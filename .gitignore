@@ -2,3 +2,7 @@ hplay
 hserve
 hstress
 *.o
+
+# for intellij
+.idea/
+*.iml
