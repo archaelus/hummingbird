@@ -22,6 +22,9 @@
 #define NBUFFER 10
 #define MAX_BUCKETS 100
 
+// cheap hack to get closer to our Hz target
+#define USEC_FUDGE -300
+
 char *http_hostname;
 uint16_t http_port;
 char http_hosthdr[2048];
@@ -184,8 +187,6 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	evtimer_set(&req->timeoutev, timeoutcb,(void *)req);
 	evtimer_add(&req->timeoutev, &timeouttv);
 
-//	fprintf(stderr, "## request: %12d\n", reqno);
-
 	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, "/");
 }
 
@@ -221,6 +222,7 @@ complete(int how, struct request *req)
 	    counts.timeouts /*+ counts.closes*/;
 	/* enqueue the next one */
 	if(params.count<0 || total<params.count){
+	    // re-scheduling is handled by the callback
 	    if(!rateLimitingEnabled()) {
             if(params.rpc<0 || params.rpc>req->evcon_reqno){
                 dispatch(req->evcon, req->evcon_reqno + 1);
@@ -245,15 +247,12 @@ complete(int how, struct request *req)
 void
 runnerEventCallback(int fd, short what, void *arg)
 {
-    Runner *runner;
-
-    runner = (Runner *)arg;
+    Runner *runner = (Runner *)arg;
     if(rateLimitingEnabled()) {
         event_add(&runner->ev, &runner->tv);
-        dispatch(runner->evcon, 1);
-    } else {
-        dispatch(runner->evcon, 1);
     }
+
+    dispatch(runner->evcon, ++ runner->reqno);
 }
 
 /**
@@ -266,19 +265,19 @@ startNewRunner()
     if(runner == nil)
         panic("calloc");
 
-    fprintf(stderr, "starting new runner\n");
-
     runner->evcon = mkhttp();
-    runner->tv.tv_sec = 0;
-    runner->tv.tv_usec = 1000000/params.qps - 200;
-
-    if(runner->tv.tv_usec < 1)
-        runner->tv.tv_usec = 1;
 
     if(rateLimitingEnabled()) {
+        runner->tv.tv_sec = 0;
+        runner->tv.tv_usec = 1000000/params.qps + USEC_FUDGE;
+
+        if(runner->tv.tv_usec < 1)
+            runner->tv.tv_usec = 1;
+
         evtimer_set(&runner->ev, runnerEventCallback, runner);
         evtimer_add(&runner->ev, &runner->tv);
     } else {
+        // skip the timers and just loop as fast as possible
         runnerEventCallback(0, 0, runner);
     }
 }
@@ -541,7 +540,6 @@ main(int argc, char **argv)
 
 	    case 'l':
 	        params.qps = atoi(optarg);
-	        fprintf(stderr, "QPS: %d\n", params.qps);
 	        break;
 
 		case 'h':
