@@ -22,6 +22,8 @@
 #define NBUFFER 10
 #define MAX_BUCKETS 100
 
+#define BUFFER_SIZE 65536
+
 // cheap hack to get closer to our Hz target
 #define USEC_FUDGE -300
 
@@ -36,6 +38,8 @@ struct{
 	int nbuckets;
 	int rpc;
 	int qps;
+	char *tsvout;
+	FILE *tsvoutfile;
 }params;
 
 struct{
@@ -93,6 +97,12 @@ unsigned char
 rateLimitingEnabled()
 {
     return params.qps > 0;
+}
+
+unsigned char
+tsvOutputEnabled()
+{
+    return params.tsvout != nil;
 }
 
 /*
@@ -191,19 +201,27 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 }
 
 void
-complete(int how, struct request *req)
+saveRequest(int how, struct request *req)
 {
-	struct timeval now, diff;
-	int i, total;
+    int i;
+    long startMicros, nowMicros;
 	long milliseconds;
+	struct timeval now, diff;
 
-	evtimer_del(&req->timeoutev);
+    gettimeofday(&now, nil);
 
-	switch(how){
+    startMicros = req->starttv.tv_sec * 1000000 + req->starttv.tv_usec;
+    nowMicros   = now.tv_sec * 1000000 + now.tv_usec;
+
+    timersub(&now, &req->starttv, &diff);
+    milliseconds = (nowMicros - startMicros)/1000;
+
+    if(tsvOutputEnabled()) {
+        fprintf(params.tsvoutfile, "%ld\t%ld\t%d\n", startMicros, nowMicros, how);
+    }
+
+    switch(how){
 	case Success:
-		gettimeofday(&now, nil);
-		timersub(&now, &req->starttv, &diff);
-		milliseconds = diff.tv_sec * 1000 + diff.tv_usec / 1000;
 		for(i=0; params.buckets[i]<milliseconds &&
 		    params.buckets[i]!=0; i++);
 		counts.counters[i]++;
@@ -216,6 +234,15 @@ complete(int how, struct request *req)
 		counts.timeouts++;
 		break;
 	}
+}
+
+void
+complete(int how, struct request *req)
+{
+	int total;
+	saveRequest(how, req);
+
+	evtimer_del(&req->timeoutev);
 
 	total =
 	    counts.successes + counts.errors + 
@@ -240,7 +267,7 @@ complete(int how, struct request *req)
 		}
 	}
 
-	
+
 	free(req);
 }
 
@@ -497,7 +524,7 @@ main(int argc, char **argv)
 
 	memset(&counts, 0, sizeof(counts));
 
-	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:h")) != -1){
+	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:o:h")) != -1){
 		switch(ch){
 		case 'b':
 			sp = optarg;
@@ -540,6 +567,15 @@ main(int argc, char **argv)
 
 	    case 'l':
 	        params.qps = atoi(optarg);
+	        break;
+
+	    case 'o':
+	        params.tsvout = optarg;
+	        params.tsvoutfile = fopen(params.tsvout, "w+");
+
+	        if(params.tsvoutfile == nil)
+	            panic("Could not open TSV outputfile: %s", optarg);
+
 	        break;
 
 		case 'h':
@@ -623,6 +659,12 @@ main(int argc, char **argv)
 		}
 
 		close(fds[1]);
+
+		// create a buffer for this process
+		if(tsvOutputEnabled()) {
+            char *outBuffer = mal(sizeof(char) * BUFFER_SIZE);
+            setvbuf(params.tsvoutfile, outBuffer, _IOLBF, BUFFER_SIZE);
+		}
 
 		for(i=0; i<params.concurrency; i++)
 		    startNewRunner();
