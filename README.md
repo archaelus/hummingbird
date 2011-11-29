@@ -30,6 +30,8 @@ The default host is `127.0.0.1`, and the default port is `80`.
 
 * `-l` limits the request rate on each concurrent thread on each process (in hertz; defaults to no limit)
 
+* `-o` output each request's stats to a TSV-formatted file
+
 `hb` produces output like the following:
 
 	$ hb -n100000 -c20 localhost 8080
@@ -79,6 +81,18 @@ Note that with concurrency enabled the rate limiting control (`-l`) will be mult
 	# >=100		0	0.00
 	# hz		1845
 
+Data is written to TSV in the format start microseconds, stop microseconds, status (0 for Success!)
+
+	1322596079103530	1322596079103953	0
+	1322596079103673	1322596079104079	0
+	1322596079103967	1322596079104411	0
+	1322596079103771	1322596079104419	0
+	1322596079104092	1322596079104566	0
+	1322596079104425	1322596079104772	0
+	1322596079104433	1322596079104804	0
+	1322596079104578	1322596079105082	0
+	1322596079104786	1322596079105219	0
+	1322596079104818	1322596079105387	0
 
 # hplay
 
