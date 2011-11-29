@@ -85,6 +85,13 @@ void closecb(struct evhttp_connection *evcon, void *arg);
 void report();
 void sigint(int which);
 
+
+unsigned char
+rateLimitingEnabled()
+{
+    return params.qps > 0;
+}
+
 /*
 	Reporting.
 */
@@ -158,8 +165,6 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	struct evhttp_request *evreq;
 	struct request *req;
 
-	fprintf(stderr, "YO YO DISPATCH\n");
-
 	if((req = calloc(1, sizeof(*req))) == nil)
 		panic("calloc");
 
@@ -179,7 +184,7 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	evtimer_set(&req->timeoutev, timeoutcb,(void *)req);
 	evtimer_add(&req->timeoutev, &timeouttv);
 
-	fprintf(stderr, "## request: %12d\n", reqno);
+//	fprintf(stderr, "## request: %12d\n", reqno);
 
 	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, "/");
 }
@@ -216,14 +221,14 @@ complete(int how, struct request *req)
 	    counts.timeouts /*+ counts.closes*/;
 	/* enqueue the next one */
 	if(params.count<0 || total<params.count){
-		if(params.rpc<0 || params.rpc>req->evcon_reqno){
-			dispatch(req->evcon, req->evcon_reqno + 1);
-		}else{
-			evhttp_connection_free(req->evcon);
-			dispatch(mkhttp(), 1);
-
-
-		}
+	    if(!rateLimitingEnabled()) {
+            if(params.rpc<0 || params.rpc>req->evcon_reqno){
+                dispatch(req->evcon, req->evcon_reqno + 1);
+            }else{
+                evhttp_connection_free(req->evcon);
+                dispatch(mkhttp(), 1);
+            }
+        }
 	}else{
 		/* We'll count this as a close. I guess that's ok. */
 		evhttp_connection_free(req->evcon);
@@ -237,24 +242,16 @@ complete(int how, struct request *req)
 	free(req);
 }
 
-unsigned char
-rateLimitingEnabled()
-{
-    return params.qps > 0;
-}
-
 void
 runnerEventCallback(int fd, short what, void *arg)
 {
     Runner *runner;
 
-    fprintf(stderr, "runner callback\n");
-
+    runner = (Runner *)arg;
     if(rateLimitingEnabled()) {
-        fprintf(stderr, "--- w/ rate limiting\n");
+        event_add(&runner->ev, &runner->tv);
+        dispatch(runner->evcon, 1);
     } else {
-        fprintf(stderr, "--- No rate limit! GO GO GO\n");
-        runner = (Runner *)arg;
         dispatch(runner->evcon, 1);
     }
 }
@@ -272,9 +269,13 @@ startNewRunner()
     fprintf(stderr, "starting new runner\n");
 
     runner->evcon = mkhttp();
+    runner->tv.tv_sec = 0;
+    runner->tv.tv_usec = 1000000/params.qps - 200;
+
+    if(runner->tv.tv_usec < 1)
+        runner->tv.tv_usec = 1;
 
     if(rateLimitingEnabled()) {
-        fprintf(stderr, "with rate limiting\n");
         evtimer_set(&runner->ev, runnerEventCallback, runner);
         evtimer_add(&runner->ev, &runner->tv);
     } else {
@@ -582,8 +583,8 @@ main(int argc, char **argv)
 	event_dispatch(); exit(0);
 #endif
 
-	fprintf(stderr, "# params: c=%d p=%d n=%d r=%d\n", 
-	    params.concurrency, nprocs, params.count, params.rpc);
+	fprintf(stderr, "# params: c=%d p=%d n=%d r=%d l=%d\n",
+	    params.concurrency, nprocs, params.count, params.rpc, params.qps);
 
 	fprintf(stderr, "# ts\t\terrors\ttimeout\tcloses\t");
 	for(i=0; params.buckets[i]!=0; i++)
