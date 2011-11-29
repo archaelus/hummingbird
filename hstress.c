@@ -32,7 +32,7 @@ struct{
 	int buckets[MAX_BUCKETS];
 	int nbuckets;
 	int rpc;
-	int rate_limit;
+	int qps;
 }params;
 
 struct{
@@ -150,6 +150,8 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 {
 	struct evhttp_request *evreq;
 	struct request *req;
+
+//    fprintf(stderr, "## request: %12d\n", reqno);
 
 	if((req = calloc(1, sizeof(*req))) == nil)
 		panic("calloc");
@@ -485,7 +487,9 @@ main(int argc, char **argv)
 			break;
 
 	    case 'l':
-	        params.rate_limit = atoi(optarg);
+	        fprintf(stderr, "SETTING QPS: %s\n", optarg);
+	        params.qps = atoi(optarg);
+	        fprintf(stderr, "QPS: %d\n", params.qps);
 	        break;
 
 		case 'h':
