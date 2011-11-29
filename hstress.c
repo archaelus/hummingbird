@@ -52,6 +52,14 @@ struct request{
 	int					evcon_reqno;
 };
 
+struct Runner{
+    struct timeval            tv;
+    struct event              ev;
+    struct evhttp_connection *evcon;
+    int                       reqno;
+};
+typedef struct Runner Runner;
+
 enum{
 	Success,
 	Closed,
@@ -98,8 +106,7 @@ mkrate(struct timeval *tv, int count)
 void
 reportcb(int fd, short what, void *arg)
 {
-	struct timeval now, diff;
-	int i, count, milliseconds;
+	int i;
 
 	printf("%d\t", nreport++);
 	printf("%d\t", counts.errors);
@@ -151,7 +158,7 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	struct evhttp_request *evreq;
 	struct request *req;
 
-//    fprintf(stderr, "## request: %12d\n", reqno);
+	fprintf(stderr, "YO YO DISPATCH\n");
 
 	if((req = calloc(1, sizeof(*req))) == nil)
 		panic("calloc");
@@ -171,6 +178,8 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	gettimeofday(&req->starttv, nil);
 	evtimer_set(&req->timeoutev, timeoutcb,(void *)req);
 	evtimer_add(&req->timeoutev, &timeouttv);
+
+	fprintf(stderr, "## request: %12d\n", reqno);
 
 	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, "/");
 }
@@ -212,6 +221,8 @@ complete(int how, struct request *req)
 		}else{
 			evhttp_connection_free(req->evcon);
 			dispatch(mkhttp(), 1);
+
+
 		}
 	}else{
 		/* We'll count this as a close. I guess that's ok. */
@@ -224,6 +235,51 @@ complete(int how, struct request *req)
 
 	
 	free(req);
+}
+
+unsigned char
+rateLimitingEnabled()
+{
+    return params.qps > 0;
+}
+
+void
+runnerEventCallback(int fd, short what, void *arg)
+{
+    Runner *runner;
+
+    fprintf(stderr, "runner callback\n");
+
+    if(rateLimitingEnabled()) {
+        fprintf(stderr, "--- w/ rate limiting\n");
+    } else {
+        fprintf(stderr, "--- No rate limit! GO GO GO\n");
+        runner = (Runner *)arg;
+        dispatch(runner->evcon, 1);
+    }
+}
+
+/**
+ start a new, potentially, rate-limited runner
+ */
+void
+startNewRunner()
+{
+    Runner *runner = calloc(1, sizeof(Runner));
+    if(runner == nil)
+        panic("calloc");
+
+    fprintf(stderr, "starting new runner\n");
+
+    runner->evcon = mkhttp();
+
+    if(rateLimitingEnabled()) {
+        fprintf(stderr, "with rate limiting\n");
+        evtimer_set(&runner->ev, runnerEventCallback, runner);
+        evtimer_add(&runner->ev, &runner->tv);
+    } else {
+        runnerEventCallback(0, 0, runner);
+    }
 }
 
 void
@@ -325,8 +381,6 @@ chldreadcb(struct bufferevent *b, void *arg)
 void
 chlderrcb(struct bufferevent *b, short what, void *arg)
 {
-	int *nprocs =(int *)arg;
-
 	bufferevent_setcb(b, nil, nil, nil, nil);
 	bufferevent_disable(b, EV_READ | EV_WRITE);
 	bufferevent_free(b);
@@ -338,7 +392,7 @@ chlderrcb(struct bufferevent *b, short what, void *arg)
 void
 parentd(int nprocs, int *sockets)
 {
-	int *fdp, i, status, size;
+	int *fdp, i, status;
 	pid_t pid;
 	struct bufferevent *b;
 	
@@ -418,8 +472,7 @@ usage(char *cmd)
 	fprintf(
 		stderr,
 		"%s: [-c CONCURRENCY] [-b BUCKETS] "
-		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [-l RATE_LIMIT] "
-		"[HOST] [PORT]\n",
+		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [HOST] [PORT]\n",
 		cmd);
 
 	exit(0);
@@ -431,7 +484,6 @@ main(int argc, char **argv)
 	int ch, i, nprocs = 1, is_parent = 1, port, *sockets, fds[2];
 	pid_t pid;
 	char *sp, *ap, *host, *cmd = argv[0];
-	struct hostent *he;
 
 	/* Defaults */
 	params.count = -1;
@@ -445,7 +497,7 @@ main(int argc, char **argv)
 
 	memset(&counts, 0, sizeof(counts));
 
-	while((ch = getopt(argc, argv, "c:b:n:p:r:i:h:l")) != -1){
+	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:h")) != -1){
 		switch(ch){
 		case 'b':
 			sp = optarg;
@@ -487,7 +539,6 @@ main(int argc, char **argv)
 			break;
 
 	    case 'l':
-	        fprintf(stderr, "SETTING QPS: %s\n", optarg);
 	        params.qps = atoi(optarg);
 	        fprintf(stderr, "QPS: %d\n", params.qps);
 	        break;
@@ -575,8 +626,9 @@ main(int argc, char **argv)
 		close(fds[1]);
 
 		for(i=0; i<params.concurrency; i++)
-			dispatch(mkhttp(), 1);
+		    startNewRunner();
 
+        /* event handler for reports */
 		evtimer_set(&reportev, reportcb, nil);
 		evtimer_add(&reportev, &reporttv);
 
