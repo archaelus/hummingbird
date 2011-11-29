@@ -28,7 +28,7 @@ The default host is `127.0.0.1`, and the default port is `80`.
   
 * `-i` specifies the reporting interval in seconds
 
-* `-l` limits the request rate on each concurrent thread (in hertz; defaults to no limit)
+* `-l` limits the request rate on each concurrent thread on each process (in hertz; defaults to no limit)
 
 `hb` produces output like the following:
 
@@ -55,6 +55,30 @@ according to the specified bucketing (controlled via `-b`). This
 output format is handy for analysis with the standard Unix tools. The
 banner is written to `stderr`, so only the data values are emitted to
 `stdout`.
+
+Note that with concurrency enabled the rate limiting control (`-l`) will be multiplied. For exampled:
+
+	$ ./hstress -c2 -p2 -l500
+	# params: c=2 p=2 n=-1 r=-1 l=500
+	# ts		errors	timeout	closes	<1	<10	<100	>=100	hz
+	1322591544	0	0	16	1950	2	0	0	1952
+	1322591545	0	0	20	1952	0	0	0	1952
+	1322591546	0	0	20	1956	0	0	0	1956
+	1322591547	0	0	20	1952	0	0	0	1952
+	1322591548	0	0	20	1952	0	0	0	1952
+	1322591549	0	0	20	1952	0	0	0	1952
+	1322591550	0	0	16	1958	0	0	0	1958
+	1322591551	0	0	20	1970	0	0	0	1970
+	# successes	15644	1.00
+	# errors	0	0.00
+	# timeouts	0	0.00
+	# closes	152	0.01
+	# <1		15642	1.00
+	# <10		2	0.00
+	# <100		0	0.00
+	# >=100		0	0.00
+	# hz		1845
+
 
 # hplay
 
