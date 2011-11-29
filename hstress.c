@@ -40,6 +40,7 @@ struct{
 	int qps;
 	char *tsvout;
 	FILE *tsvoutfile;
+	char *path;
 }params;
 
 struct{
@@ -197,7 +198,7 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	evtimer_set(&req->timeoutev, timeoutcb,(void *)req);
 	evtimer_add(&req->timeoutev, &timeouttv);
 
-	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, "/");
+	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, params.path);
 }
 
 void
@@ -499,7 +500,8 @@ usage(char *cmd)
 	fprintf(
 		stderr,
 		"%s: [-c CONCURRENCY] [-b BUCKETS] "
-		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [HOST] [PORT]\n",
+		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [-u GET_PATH] "
+		"[HOST] [PORT]\n",
 		cmd);
 
 	exit(0);
@@ -521,10 +523,11 @@ main(int argc, char **argv)
 	params.buckets[1] = 10;
 	params.buckets[2] = 100;
 	params.nbuckets = 4;
+	params.path = "/";
 
 	memset(&counts, 0, sizeof(counts));
 
-	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:o:h")) != -1){
+	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:h")) != -1){
 		switch(ch){
 		case 'b':
 			sp = optarg;
@@ -575,7 +578,10 @@ main(int argc, char **argv)
 
 	        if(params.tsvoutfile == nil)
 	            panic("Could not open TSV outputfile: %s", optarg);
+	        break;
 
+	    case 'u':
+	        params.path = optarg;
 	        break;
 
 		case 'h':
@@ -617,8 +623,8 @@ main(int argc, char **argv)
 	event_dispatch(); exit(0);
 #endif
 
-	fprintf(stderr, "# params: c=%d p=%d n=%d r=%d l=%d\n",
-	    params.concurrency, nprocs, params.count, params.rpc, params.qps);
+	fprintf(stderr, "# params: %s:%d c=%d p=%d n=%d r=%d l=%d u=%s\n",
+	    http_hostname, http_port, params.concurrency, nprocs, params.count, params.rpc, params.qps, params.path);
 
 	fprintf(stderr, "# ts\t\terrors\ttimeout\tcloses\t");
 	for(i=0; params.buckets[i]!=0; i++)
