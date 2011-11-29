@@ -32,6 +32,7 @@ struct{
 	int buckets[MAX_BUCKETS];
 	int nbuckets;
 	int rpc;
+	int rate_limit;
 }params;
 
 struct{
@@ -415,7 +416,8 @@ usage(char *cmd)
 	fprintf(
 		stderr,
 		"%s: [-c CONCURRENCY] [-b BUCKETS] "
-		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [HOST] [PORT]\n",
+		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [-l RATE_LIMIT] "
+		"[HOST] [PORT]\n",
 		cmd);
 
 	exit(0);
@@ -441,7 +443,7 @@ main(int argc, char **argv)
 
 	memset(&counts, 0, sizeof(counts));
 
-	while((ch = getopt(argc, argv, "c:b:n:p:r:i:h")) != -1){
+	while((ch = getopt(argc, argv, "c:b:n:p:r:i:h:l")) != -1){
 		switch(ch){
 		case 'b':
 			sp = optarg;
@@ -481,6 +483,10 @@ main(int argc, char **argv)
 		case 'r':
 			params.rpc = atoi(optarg);
 			break;
+
+	    case 'l':
+	        params.rate_limit = atoi(optarg);
+	        break;
 
 		case 'h':
 			usage(cmd);
