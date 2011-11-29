@@ -455,7 +455,7 @@ main(int argc, char **argv)
 			for(i=0; i<MAX_BUCKETS && (ap=strsep(&sp, ",")) != nil; i++)
 				params.buckets[i] = atoi(ap);
 
-			params.nbuckets = i;
+			params.nbuckets = i+1;
 
 			if(params.buckets[0] == 0)
 				panic("first bucket must be >0\n");

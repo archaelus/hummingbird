@@ -28,6 +28,8 @@ The default host is `127.0.0.1`, and the default port is `80`.
   
 * `-i` specifies the reporting interval in seconds
 
+* `-l` limits the request rate on each concurrent thread (in hertz; defaults to no limit)
+
 `hb` produces output like the following:
 
 	$ hb -n100000 -c20 localhost 8080
