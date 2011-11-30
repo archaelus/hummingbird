@@ -126,16 +126,23 @@ responseRecordingEnabled()
 */
 
 int
+millisecondsSinceStart(struct timeval *tv)
+{
+    int milliseconds;
+    struct timeval now, diff;
+
+    gettimeofday(&now, nil);
+    timersub(&now, tv, &diff);
+    milliseconds = diff.tv_sec * 1000 + diff.tv_usec / 1000;
+
+    return milliseconds;
+}
+
+int
 mkrate(struct timeval *tv, int count)
 {
-	int milliseconds;
-	struct timeval now, diff;
-
-	gettimeofday(&now, nil);
-	timersub(&now, tv, &diff);
-	milliseconds = diff.tv_sec * 1000 + diff.tv_usec / 1000;
-	*tv = now;
-
+    int milliseconds;
+    milliseconds = millisecondsSinceStart(tv);
 	return(1000 * count / milliseconds);
 }
 
@@ -526,6 +533,7 @@ report()
 	printcount(buf, total, counts.counters[i]);
 	
 	/* no total */
+	fprintf(stderr, "# time\t\t%.3f\n", millisecondsSinceStart(&ratetv)/1000.0);
 	fprintf(stderr, "# hz\t\t%d\n", mkrate(&ratetv, counts.successes));
 }
 
