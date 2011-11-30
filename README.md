@@ -6,7 +6,9 @@ hummingbird - no bullshit HTTP load testing suite
 
 Options are as follows:
 
-    hstress [-c CONCURRENCY] [-b BUCKETS] [-n COUNT] [-p NUMPROCS] [-r RPC] [-i INTERVAL] [HOST] [PORT]
+    hstress [-c CONCURRENCY] [-b BUCKETS] [-n COUNT] [-p NUMPROCS]
+    [-r RPC] [-i INTERVAL] [-o TSV RECORD] [-x RESPONSE RECORD]
+    [-w WARMUP] [-u PATH] [HOST] [PORT]
 
 The default host is `127.0.0.1`, and the default port is `80`.
 
@@ -31,6 +33,12 @@ The default host is `127.0.0.1`, and the default port is `80`.
 * `-l` limits the request rate on each concurrent thread on each process (in hertz; defaults to no limit)
 
 * `-o` output each request's stats to a TSV-formatted file
+
+* `-x` records the content of each response to a file, separated by `---\n`
+
+* `-w` specifies a warmup for each thread (the number of ignored successful requests)
+
+* `-u` allows specifying a path other than `/`.
 
 `hb` produces output like the following:
 
@@ -93,6 +101,22 @@ Data is written to TSV in the format start microseconds, stop microseconds, stat
 	1322596079104578	1322596079105082	0
 	1322596079104786	1322596079105219	0
 	1322596079104818	1322596079105387	0
+
+HTTP responses can be saved with the `-x` option and a corresponding file. For example:
+
+    $ ./hstress -x responses.out
+    $ head responses.out
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+    <html><body><h1>It works!</h1></body></html>---
+
 
 # hplay
 
