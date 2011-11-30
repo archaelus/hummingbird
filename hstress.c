@@ -125,25 +125,25 @@ responseRecordingEnabled()
 	Reporting.
 */
 
-int
+long
 millisecondsSinceStart(struct timeval *tv)
 {
-    int milliseconds;
+    long milliseconds;
     struct timeval now, diff;
 
     gettimeofday(&now, nil);
     timersub(&now, tv, &diff);
-    milliseconds = diff.tv_sec * 1000 + diff.tv_usec / 1000;
+    milliseconds = diff.tv_sec * 1000L + diff.tv_usec / 1000L;
 
     return milliseconds;
 }
 
-int
+long
 mkrate(struct timeval *tv, int count)
 {
-    int milliseconds;
+    long milliseconds;
     milliseconds = millisecondsSinceStart(tv);
-	return(1000 * count / milliseconds);
+	return(1000L * count / milliseconds);
 }
 
 void
@@ -435,7 +435,7 @@ chldreadcb(struct bufferevent *b, void *arg)
 			for(i=3; i<params.nbuckets+1; i++)
 				total += reportbuf[n][i];
 
-			printf("%d\n", mkrate(&lastreporttv, total));
+			printf("%ld\n", mkrate(&lastreporttv, total));
 			resetTime(&lastreporttv);
 			
 			/* Aggregate. */
@@ -541,7 +541,7 @@ report()
 	
 	/* no total */
 	fprintf(stderr, "# time\t\t%.3f\n", millisecondsSinceStart(&ratetv)/1000.0);
-	fprintf(stderr, "# hz\t\t%d\n", mkrate(&ratetv, counts.successes));
+	fprintf(stderr, "# hz\t\t%ld\n", mkrate(&ratetv, counts.successes));
 }
 
 /*
