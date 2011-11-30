@@ -502,7 +502,7 @@ printcount(const char *name, int total, int count)
 {
 	fprintf(stderr, "# %s", name);
 	if(total > 0)
-		fprintf(stderr, "\t%d\t%.02f", count,(1.0f*count) /(1.0f*total));
+		fprintf(stderr, "\t%d\t%.05f", count,(1.0f*count) /(1.0f*total));
 	
 	fprintf(stderr, "\n");
 }
