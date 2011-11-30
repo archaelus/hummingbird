@@ -147,6 +147,12 @@ mkrate(struct timeval *tv, int count)
 }
 
 void
+resetTime(struct timeval *tv)
+{
+    gettimeofday(tv, nil);
+}
+
+void
 reportcb(int fd, short what, void *arg)
 {
 	int i;
@@ -430,6 +436,7 @@ chldreadcb(struct bufferevent *b, void *arg)
 				total += reportbuf[n][i];
 
 			printf("%d\n", mkrate(&lastreporttv, total));
+			resetTime(&lastreporttv);
 			
 			/* Aggregate. */
 			counts.errors += reportbuf[n][0];
