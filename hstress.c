@@ -40,6 +40,8 @@ struct{
 	int rpc;
 	int qps;
 
+	int warmup;
+
 	// for logging output time
 	char *tsvout;
 	FILE *tsvoutfile;
@@ -73,7 +75,9 @@ struct Runner{
     struct timeval            tv;
     struct event              ev;
     struct evhttp_connection *evcon;
+    struct request            *req;
     int                       reqno;
+    int                       warmupRemaining;
 };
 typedef struct Runner Runner;
 
@@ -202,18 +206,20 @@ mkhttp()
 }
 
 void
-dispatch(struct evhttp_connection *evcon, int reqno)
+dispatch(Runner *runner, int reqno)
 {
+    struct evhttp_connection *evcon = runner->evcon;
 	struct evhttp_request *evreq;
 	struct request *req;
 
 	if((req = calloc(1, sizeof(*req))) == nil)
 		panic("calloc");
 
+    runner->req = req;
 	req->evcon = evcon;
 	req->evcon_reqno = reqno;
 
-	evreq = evhttp_request_new(&recvcb, req);
+	evreq = evhttp_request_new(&recvcb, runner);
 	if(evreq == nil)
 		panic("evhttp_request_new");
 
@@ -223,7 +229,7 @@ dispatch(struct evhttp_connection *evcon, int reqno)
 	evhttp_add_header(evreq->output_headers, "Host", http_hosthdr);
 
 	gettimeofday(&req->starttv, nil);
-	evtimer_set(&req->timeoutev, timeoutcb,(void *)req);
+	evtimer_set(&req->timeoutev, timeoutcb,(void *)runner);
 	evtimer_add(&req->timeoutev, &timeouttv);
 
 	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, params.path);
@@ -250,12 +256,19 @@ drainBuffer(struct request *req, FILE *outstream)
 }
 
 void
-saveRequest(int how, struct request *req)
+saveRequest(int how, Runner *runner)
 {
+    struct request *req = runner->req;
     int i;
     long startMicros, nowMicros;
 	long milliseconds;
 	struct timeval now, diff;
+
+
+	if(runner->warmupRemaining > 0) {
+	    runner->warmupRemaining--;
+	    return;
+	}
 
     gettimeofday(&now, nil);
 
@@ -290,10 +303,11 @@ saveRequest(int how, struct request *req)
 }
 
 void
-complete(int how, struct request *req)
+complete(int how, Runner *runner)
 {
+    struct request *req = runner -> req;
 	int total;
-	saveRequest(how, req);
+	saveRequest(how, runner);
 
 	evtimer_del(&req->timeoutev);
 
@@ -305,10 +319,11 @@ complete(int how, struct request *req)
 	    // re-scheduling is handled by the callback
 	    if(!rateLimitingEnabled()) {
             if(params.rpc<0 || params.rpc>req->evcon_reqno){
-                dispatch(req->evcon, req->evcon_reqno + 1);
+                dispatch(runner, req->evcon_reqno + 1);
             }else{
                 evhttp_connection_free(req->evcon);
-                dispatch(mkhttp(), 1);
+                runner->evcon = mkhttp();
+                dispatch(runner, 1);
             }
         }
 	}else{
@@ -332,7 +347,7 @@ runnerEventCallback(int fd, short what, void *arg)
         event_add(&runner->ev, &runner->tv);
     }
 
-    dispatch(runner->evcon, ++ runner->reqno);
+    dispatch(runner, ++ runner->reqno);
 }
 
 /**
@@ -346,6 +361,7 @@ startNewRunner()
         panic("calloc");
 
     runner->evcon = mkhttp();
+    runner->warmupRemaining = params.warmup;
 
     if(rateLimitingEnabled()) {
         runner->tv.tv_sec = 0;
@@ -378,19 +394,20 @@ recvcb(struct evhttp_request *evreq, void *arg)
 	if(evreq == nil || evreq->response_code < 0)
 		status = Error;
 
-	complete(status,(struct request *)arg);
+	complete(status, (Runner *)arg);
 }
 
 void
 timeoutcb(int fd, short what, void *arg)
 {
-	struct request *req =(struct request *)arg;
+    Runner *runner = (Runner *)arg;
+	struct request *req = runner->req;
 	
 	/* re-establish the connection */
 	evhttp_connection_free(req->evcon);
 	req->evcon = mkhttp();
 
-	complete(Timeout, req);
+	complete(Timeout, runner);
 }
 
 void
@@ -582,7 +599,7 @@ main(int argc, char **argv)
 
 	memset(&counts, 0, sizeof(counts));
 
-	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:x:h")) != -1){
+	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:w:x:h")) != -1){
 		switch(ch){
 		case 'b':
 			sp = optarg;
@@ -626,6 +643,10 @@ main(int argc, char **argv)
 	    case 'l':
 	        params.qps = atoi(optarg);
 	        break;
+
+        case 'w':
+            params.warmup = atoi(optarg);
+            break;
 
 	    case 'o':
 	        params.tsvout = optarg;
@@ -678,12 +699,6 @@ main(int argc, char **argv)
 
 	if(params.count > 0)
 		params.count /= nprocs;
-
-#if 0
-	event_init();
-	dispatch(mkhttp(), 1);
-	event_dispatch(); exit(0);
-#endif
 
 	fprintf(stderr, "# params: %s:%d c=%d p=%d n=%d r=%d l=%d u=%s\n",
 	    http_hostname, http_port, params.concurrency, nprocs, params.count, params.rpc, params.qps, params.path);
