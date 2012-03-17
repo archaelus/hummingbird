@@ -47,10 +47,6 @@ struct{
 	char *tsvout;
 	FILE *tsvoutfile;
 
-	// for logging reponse content
-	char *responseout;
-	FILE *responseoutfile;
-
 	// request path
 	char *path;
 }params;
@@ -122,12 +118,6 @@ unsigned char
 tsvOutputEnabled()
 {
     return params.tsvout != nil;
-}
-
-unsigned char
-responseRecordingEnabled()
-{
-    return params.responseout != nil;
 }
 
 /*
@@ -242,26 +232,6 @@ dispatch(Runner *runner, int reqno)
 	evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, params.path);
 }
 
-
-
-void
-drainBuffer(struct request *req, FILE *outstream)
-{
-    struct evbuffer *requestBuffer;
-
-    // are we re-allocating 4096bytes on each request? Seems inefficient.
-    char charBuffer[DRAIN_BUFFER_SIZE];
-    int bytesread = 0;
-
-    requestBuffer = evhttp_request_get_input_buffer(req->evreq);
-
-    do {
-        bytesread = evbuffer_remove(requestBuffer, charBuffer, DRAIN_BUFFER_SIZE);
-        fwrite(charBuffer, 1, bytesread, outstream);
-    } while(bytesread > 0);
-    fputs("---\n", outstream);
-}
-
 void
 saveRequest(int how, Runner *runner)
 {
@@ -287,10 +257,6 @@ saveRequest(int how, Runner *runner)
 
     if(tsvOutputEnabled()) {
         fprintf(params.tsvoutfile, "%ld\t%ld\t%d\n", startMicros, nowMicros, how);
-    }
-
-    if(responseRecordingEnabled()) {
-        drainBuffer(req, params.responseoutfile);
     }
 
     switch(how){
@@ -589,8 +555,7 @@ usage(char *cmd)
 		stderr,
 		"%s: [-c CONCURRENCY] [-b BUCKETS]\n"
 		"[-n COUNT] [-p NUMPROCS] [-r INTERVAL] [-u GET_PATH]\n"
-		"[-o TIMING_LOG] [-x RESPONSE_LOG]\n"
-		"[HOST] [PORT]\n",
+		"[-o TIMING_LOG] [HOST] [PORT]\n",
 		cmd);
 
 	exit(0);
@@ -616,7 +581,7 @@ main(int argc, char **argv)
 
 	memset(&counts, 0, sizeof(counts));
 
-	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:w:x:h")) != -1){
+	while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:w:h")) != -1){
 		switch(ch){
 		case 'b':
 			sp = optarg;
@@ -671,13 +636,6 @@ main(int argc, char **argv)
 
 	        if(params.tsvoutfile == nil)
 	            panic("Could not open TSV outputfile: %s", optarg);
-	        break;
-
-	    case 'x':
-	        params.responseout = optarg;
-	        params.responseoutfile = fopen(params.responseout, "w+");
-	        if(params.responseoutfile == nil)
-	            panic("Could not open response record file: %s", optarg);
 	        break;
 
 	    case 'u':
@@ -764,11 +722,6 @@ main(int argc, char **argv)
 		if(tsvOutputEnabled()) {
             char *outBuffer = mal(sizeof(char) * OUTFILE_BUFFER_SIZE);
             setvbuf(params.tsvoutfile, outBuffer, _IOLBF, OUTFILE_BUFFER_SIZE);
-		}
-
-		if(responseRecordingEnabled()) {
-		    char *outBuffer = mal(sizeof(char) * OUTFILE_BUFFER_SIZE);
-		    setvbuf(params.responseoutfile, outBuffer, _IOLBF, OUTFILE_BUFFER_SIZE);
 		}
 
 		for(i=0; i<params.concurrency; i++)
