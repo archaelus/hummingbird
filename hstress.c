@@ -60,7 +60,11 @@ struct{
 	int errors;
 	int timeouts;
 	int closes;
+	int http_successes;
+	int http_errors;
 }counts;
+
+int num_cols = 5;
 
 struct request{
 	struct timeval 			starttv;
@@ -165,8 +169,10 @@ reportcb(int fd, short what, void *arg)
 	printf("%d\t", counts.errors);
 	printf("%d\t", counts.timeouts);
 	printf("%d\t", counts.closes);
-	
-	counts.errors = counts.timeouts = counts.closes = 0;
+  printf("%d\t", counts.http_successes);
+  printf("%d\t", counts.http_errors);
+
+	counts.errors = counts.timeouts = counts.closes = counts.http_successes = counts.http_errors = 0;
 
 	for(i=0; params.buckets[i]!=0; i++)
 		printf("%d\t", counts.counters[i]);
@@ -198,9 +204,9 @@ mkhttp()
 		note: we manage our own per-request timeouts, since the underlying
 		library does not give us enough error reporting fidelity
 	*/
-	
+
 	/* also set some socket options manually. */
-	
+
 
 	return(evcon);
 }
@@ -292,6 +298,12 @@ saveRequest(int how, Runner *runner)
 		    params.buckets[i]!=0; i++);
 		counts.counters[i]++;
 		counts.successes++;
+
+		if (req->evreq->response_code == 200){
+		  counts.http_successes++;
+		}else{
+		  counts.http_errors++;
+		}
 		break;
 	case Error:
 		counts.errors++;
@@ -312,7 +324,7 @@ complete(int how, Runner *runner)
 	evtimer_del(&req->timeoutev);
 
 	total =
-	    counts.successes + counts.errors + 
+	    counts.successes + counts.errors +
 	    counts.timeouts /*+ counts.closes*/;
 	/* enqueue the next one */
 	if(params.count<0 || total<params.count){
@@ -384,13 +396,13 @@ recvcb(struct evhttp_request *evreq, void *arg)
 
 	int status = Success;
 
-	/* 
-		It seems that, under certain circumstances, 
-		evreq may be null on failure.  
+	/*
+		It seems that, under certain circumstances,
+		evreq may be null on failure.
 
 		we'll count it as an error.
 	*/
-		 
+
 	if(evreq == nil || evreq->response_code < 0)
 		status = Error;
 
@@ -402,7 +414,7 @@ timeoutcb(int fd, short what, void *arg)
 {
     Runner *runner = (Runner *)arg;
 	struct request *req = runner->req;
-	
+
 	/* re-establish the connection */
 	evhttp_connection_free(req->evcon);
 	req->evcon = mkhttp();
@@ -438,34 +450,36 @@ chldreadcb(struct bufferevent *b, void *arg)
 
 		n %= NBUFFER;
 
-		for(i=0; i<params.nbuckets + 3 && (ap=strsep(&sp, "\t")) != nil; i++)
+		for(i=0; i<params.nbuckets + num_cols && (ap=strsep(&sp, "\t")) != nil; i++)
 			reportbuf[n][i] += atoi(ap);
 
 		if(++nreportbuf[n] >= nprocs){
 			/* Timestamp it.  */
 			printf("%d\t",(int)time(nil));
-			for(i = 0; i < params.nbuckets + 3; i++)
+			for(i = 0; i < params.nbuckets + num_cols; i++)
 				printf("%d\t", reportbuf[n][i]);
 
 			/* Compute the total rate of succesful requests. */
 			total = 0;
-			for(i=3; i<params.nbuckets+1; i++)
+			for(i=num_cols; i<params.nbuckets+num_cols; i++)
 				total += reportbuf[n][i];
 
 			printf("%ld\n", mkrate(&lastreporttv, total));
 			resetTime(&lastreporttv);
-			
+
 			/* Aggregate. */
 			counts.errors += reportbuf[n][0];
 			counts.timeouts += reportbuf[n][1];
 			counts.closes += reportbuf[n][2];
+			counts.http_successes += reportbuf[n][3];
+			counts.http_errors += reportbuf[n][4];
 			for(i=0; i<params.nbuckets; i++){
-				counts.successes += reportbuf[n][i + 3];
-				counts.counters[i] += reportbuf[n][i + 3];
+				counts.successes += reportbuf[n][i + num_cols];
+				counts.counters[i] += reportbuf[n][i + num_cols];
 			}
 
 			/* Clear it. Advance nreport. */
-			memset(reportbuf[n], 0,(params.nbuckets + 3) * sizeof(int));
+			memset(reportbuf[n], 0,(params.nbuckets + num_cols) * sizeof(int));
 			nreportbuf[n] = 0;
 			nreport++;
 		}
@@ -482,7 +496,7 @@ chlderrcb(struct bufferevent *b, short what, void *arg)
 	bufferevent_setcb(b, nil, nil, nil, nil);
 	bufferevent_disable(b, EV_READ | EV_WRITE);
 	bufferevent_free(b);
-	
+
 	/*if(--(*nprocs) == 0)
 		event_loopbreak();*/
 }
@@ -493,14 +507,14 @@ parentd(int nprocs, int *sockets)
 	int *fdp, i, status;
 	pid_t pid;
 	struct bufferevent *b;
-	
+
 	signal(SIGINT, sigint);
 
 	gettimeofday(&ratetv, nil);
 	gettimeofday(&lastreporttv, nil);
 	memset(nreportbuf, 0, sizeof(nreportbuf));
 	for(i=0; i<NBUFFER; i++){
-		if((reportbuf[i] = calloc(params.nbuckets + 3, sizeof(int))) == nil)
+		if((reportbuf[i] = calloc(params.nbuckets + num_cols, sizeof(int))) == nil)
 			panic("calloc");
 	}
 
@@ -508,7 +522,7 @@ parentd(int nprocs, int *sockets)
 
 	for(fdp=sockets; *fdp!=-1; fdp++){
 		b = bufferevent_new(
-		    *fdp, chldreadcb, nil, 
+		    *fdp, chldreadcb, nil,
 		    chlderrcb,(void *)&nprocs);
 		bufferevent_enable(b, EV_READ);
 	}
@@ -517,7 +531,7 @@ parentd(int nprocs, int *sockets)
 
 	for(i=0; i<nprocs; i++)
 		pid = waitpid(0, &status, 0);
-		
+
 	report();
 }
 
@@ -534,7 +548,7 @@ printcount(const char *name, int total, int count)
 	fprintf(stderr, "# %s", name);
 	if(total > 0)
 		fprintf(stderr, "\t%d\t%.05f", count,(1.0f*count) /(1.0f*total));
-	
+
 	fprintf(stderr, "\n");
 }
 
@@ -548,14 +562,16 @@ report()
 	printcount("errors", total, counts.errors);
 	printcount("timeouts", total, counts.timeouts);
 	printcount("closes", total, counts.closes);
+	printcount("200s   ", total, counts.http_successes);
+	printcount("!200s  ", total, counts.http_errors);
 	for(i=0; params.buckets[i]!=0; i++){
 		snprintf(buf, sizeof(buf), "<%d\t", params.buckets[i]);
 		printcount(buf, total, counts.counters[i]);
 	}
-	
+
 	snprintf(buf, sizeof(buf), ">=%d\t", params.buckets[i - 1]);
 	printcount(buf, total, counts.counters[i]);
-	
+
 	/* no total */
 	fprintf(stderr, "# time\t\t%.3f\n", millisecondsSinceStart(&ratetv)/1000.0);
 	fprintf(stderr, "# hz\t\t%ld\n", mkrate(&ratetv, counts.successes));
@@ -688,7 +704,7 @@ main(int argc, char **argv)
 	default:
 		panic("only 0 or 1(host port) pair are allowed\n");
 	}
-	
+
 	http_hostname = host;
 	http_port = port;
 	if(snprintf(http_hosthdr, sizeof(http_hosthdr), "%s:%d", host, port) > sizeof(http_hosthdr))
@@ -703,7 +719,7 @@ main(int argc, char **argv)
 	fprintf(stderr, "# params: %s:%d c=%d p=%d n=%d r=%d l=%d u=%s\n",
 	    http_hostname, http_port, params.concurrency, nprocs, params.count, params.rpc, params.qps, params.path);
 
-	fprintf(stderr, "# ts\t\terrors\ttimeout\tcloses\t");
+	fprintf(stderr, "# ts\t\terrors\ttimeout\tcloses\t200s\t!200s\t");
 	for(i=0; params.buckets[i]!=0; i++)
 		fprintf(stderr, "<%d\t", params.buckets[i]);
 
