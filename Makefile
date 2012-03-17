@@ -12,6 +12,6 @@ hplay: u.o hplay.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -levent -o $@ $^
 
 clean:
-	rm -f hstress hserver hplay *.o
+	rm -f hstress hserve hplay *.o
 
 .PHONY: all clean
