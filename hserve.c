@@ -19,7 +19,6 @@ serve(char *host, short port)
 {
 	struct event_base *base;
 	struct evhttp *http;
-	struct evhttp_bound_socket *sock;
 
 	assert(host != nil);
 	assert(port != 0);
