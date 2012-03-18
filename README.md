@@ -40,30 +40,34 @@ The default host is `127.0.0.1`, and the default port is `80`.
 
 `hstress` produces output like the following:
 
-  # params: localhost:80 c=100 p=1 n=5000 r=-1 l=0 u=/
-  #             conn    conn    conn    conn    http    http
-  # ts          success errors  timeout closes  success error   <1      <10     <100    <250    <500    >=500   hz
-  1332055454    638     0       1       0       638     0       0       0       2       587     48      1       592
-  1332055455    823     0       0       0       823     0       0       0       6       814     0       3       823
-  1332055456    809     0       0       0       809     0       0       0       3       806     0       0       809
-  1332055457    788     0       0       0       788     0       0       0       1       787     0       0       788
-  1332055458    802     0       0       0       802     0       0       0       5       797     0       0       802
-  1332055459    797     0       0       0       797     0       0       0       1       795     0       1       797
-  1332055460    442     0       0       100     442     0       0       0       0       442     0       0       760
-  # conn_successes      5099    0.99980
-  # conn_errors         0       0.00000
-  # conn_timeouts       1       0.00020
-  # conn_closes         100     0.01961
-  # http_successes      5099    0.99980
-  # http_errors         0       0.00000
-  # <1                        0 0.00000
-  # <10                 0       0.00000
-  # <100                        18      0.00353
-  # <250                        5028    0.98588
-  # <500                        48      0.00941
-  # >=500                       5       0.00098
-  # time                        6.659
-  # hz                  765
+    # params: -c 50 -n -1 -p 1 -r 0 -i 1 -l 0 -u / localhost 80
+    #               conn    conn    conn    conn    http    http
+    # ts            success errors  timeout closes  success error   <1      <5      <10     <50     <100    <500    <1000   >=1000  hz
+    1332095312      678     0       0       678     678     0       0       0       0       214     297     167     0       0       642
+    1332095313      624     0       0       624     624     0       0       0       2       219     229     173     1       0       626
+    1332095314      677     0       1       678     677     0       0       0       24      405     112     136     0       0       671
+    1332095315      702     0       13      715     702     0       0       0       1       446     179     76      0       0       657
+    1332095316      517     0       19      536     517     0       0       0       20      240     160     97      0       0       523
+    1332095317      422     0       23      445     422     0       0       0       19      125     136     142     0       0       420
+    1332095318      652     0       10      662     652     0       0       0       3       255     311     83      0       0       639
+    1332095319      648     0       0       648     648     0       0       0       7       356     182     103     0       0       637
+    1332095320      640     0       16      656     640     0       0       0       2       300     192     146     0       0       640
+    # conn_successes        5560    0.98547
+    # conn_errors           0       0.00000
+    # conn_timeouts         82      0.01453
+    # conn_closes           5642    1.00000
+    # http_successes        5560    0.98547
+    # http_errors           0       0.00000
+    # <1                    0       0.00000
+    # <5                    0       0.00000
+    # <10                   78      0.01382
+    # <50                   2560    0.45374
+    # <100                  1798    0.31868
+    # <500                  1123    0.19904
+    # <1000                 1       0.00018
+    # >=1000                0       0.00000
+    # time                  10.027
+    # hz                    562
 
 The first column is the timestamp, and the subsequent columns are
 according to the specified bucketing (controlled via `-b`). Only
@@ -73,38 +77,38 @@ This output format is handy for analysis with the standard Unix tools.
 The banner is written to `stderr`, so only the data values are emitted
 to `stdout`.
 
-Data is written to TSV in the format start microseconds, stop microseconds, status (0 for Success!)
+Data is written to TSV in the format start microseconds, stop microseconds, status (0 for Success):
 
-  1322596079103530        1322596079103953        0
-  1322596079103673        1322596079104079        0
-  1322596079103967        1322596079104411        0
-  1322596079103771        1322596079104419        0
-  1322596079104092        1322596079104566        0
-  1322596079104425        1322596079104772        0
-  1322596079104433        1322596079104804        0
-  1322596079104578        1322596079105082        0
-  1322596079104786        1322596079105219        0
-  1322596079104818        1322596079105387        0
+    1322596079103530    1322596079103953    0
+    1322596079103673    1322596079104079    0
+    1322596079103967    1322596079104411    0
+    1322596079103771    1322596079104419    0
+    1322596079104092    1322596079104566    0
+    1322596079104425    1322596079104772    0
+    1322596079104433    1322596079104804    0
+    1322596079104578    1322596079105082    0
+    1322596079104786    1322596079105219    0
+    1322596079104818    1322596079105387    0
 
 # hplay
 
 `hplay` replays http requests at a constant rate. Eg.
 
-        # hplay localhost 8000 100 httpreqs
+    # hplay localhost 8000 100 httpreqs
 
 will replay the HTTP requests stored in `httpreqs` to `localhost:8000` at a rate of 100 per second. Request parsing is robust so you can give it packet dumps.
 
 For example, on a server host that receives requests you wish to replay:
 
-        $ tcpdump -n -c500 -i any dst port 10100 -s0 -w capture
+    $ tcpdump -n -c500 -i any dst port 10100 -s0 -w capture
 
 Then reconstruct it with [tcpflow](http://www.circlemud.org/~jelson/software/tcpflow/):
 
-        $ tcpflow -r capture -c | sed 's/^...\....\....\....\......\-...\....\....\....\......: //g' > reqs
+    $ tcpflow -r capture -c | sed 's/^...\....\....\....\......\-...\....\....\....\......: //g' > reqs
 
 And finally, replay these requests onto localhost:8080:
 
-        $ hplay localhost 8000 100 reqs
+    $ hplay localhost 8000 100 reqs
 
 # hserve
 
