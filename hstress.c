@@ -306,8 +306,9 @@ complete(int how, Runner *runner)
         }
     }
 
-
-    free(req);
+    if (!rateLimitingEnabled())
+      // FIXME Memory leak?
+      free(req);
 }
 
 void
@@ -653,12 +654,15 @@ main(int argc, char **argv)
     for(i = 0; params.buckets[i] != 0; i++)
         request_timeout = params.buckets[i];
 
-    if(params.count > 0)
-        params.count /= nprocs;
-
     // FIXME Should also show bucket parameters
     fprintf(stderr, "# params: -c %d -n %d -p %d -r %d -i %d -l %d -u %s %s %d\n",
         params.concurrency, params.count, nprocs, params.rpc, (int) reporttv.tv_sec, params.qps, params.path, http_hostname, http_port);
+
+    // Convert absolute params to be relative to concurrency
+    params.count /= nprocs;
+
+    params.qps /= nprocs;
+    params.qps /= params.concurrency;
 
     fprintf(stderr, "# \t\tconn\tconn\tconn\tconn\thttp\thttp\n");
     fprintf(stderr, "# ts\t\tsuccess\terrors\ttimeout\tcloses\tsuccess\terror\t");
