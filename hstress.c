@@ -42,8 +42,6 @@ struct{
     int rpc;
     int qps;
 
-    int warmup;
-
     // for logging output time
     char *tsvout;
     FILE *tsvoutfile;
@@ -80,7 +78,6 @@ struct Runner{
     struct evhttp_connection *evcon;
     struct request            *req;
     int                       reqno;
-    int                       warmupRemaining;
 };
 typedef struct Runner Runner;
 
@@ -244,11 +241,6 @@ saveRequest(int how, Runner *runner)
     long milliseconds;
     struct timeval now, diff;
 
-    if(runner->warmupRemaining > 0) {
-        runner->warmupRemaining--;
-        return;
-    }
-
     gettimeofday(&now, nil);
 
     startMicros = req->starttv.tv_sec * 1000000 + req->starttv.tv_usec;
@@ -340,7 +332,6 @@ startNewRunner()
         panic("calloc");
 
     runner->evcon = mkhttp();
-    runner->warmupRemaining = params.warmup;
 
     if(rateLimitingEnabled()) {
         runner->tv.tv_sec = 0;
@@ -548,7 +539,7 @@ usage(char *cmd)
     fprintf(
         stderr,
         "%s: [-c CONCURRENCY] [-b BUCKETS] [-n COUNT] [-p NUMPROCS]\n"
-        "[-r RPC] [-i INTERVAL] [-o TSV RECORD] [-l MAX_QPS] [-w WARMUP]\n"
+        "[-r RPC] [-i INTERVAL] [-o TSV RECORD] [-l MAX_QPS]\n"
         "[-u PATH] [HOST] [PORT]\n",
         cmd);
 
@@ -575,7 +566,7 @@ main(int argc, char **argv)
 
     memset(&counts, 0, sizeof(counts));
 
-    while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:w:h")) != -1){
+    while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:h")) != -1){
         switch(ch){
         case 'b':
             sp = optarg;
@@ -618,10 +609,6 @@ main(int argc, char **argv)
 
         case 'l':
             params.qps = atoi(optarg);
-            break;
-
-        case 'w':
-            params.warmup = atoi(optarg);
             break;
 
         case 'o':
@@ -670,8 +657,8 @@ main(int argc, char **argv)
         params.count /= nprocs;
 
     // FIXME Should also show bucket parameters
-    fprintf(stderr, "# params: -c %d -n %d -p %d -r %d -i %d -l %d -w %d -u %s %s %d\n",
-        params.concurrency, params.count, nprocs, params.rpc, (int) reporttv.tv_sec, params.qps, params.warmup, params.path, http_hostname, http_port);
+    fprintf(stderr, "# params: -c %d -n %d -p %d -r %d -i %d -l %d -u %s %s %d\n",
+        params.concurrency, params.count, nprocs, params.rpc, (int) reporttv.tv_sec, params.qps, params.path, http_hostname, http_port);
 
     fprintf(stderr, "# \t\tconn\tconn\tconn\tconn\thttp\thttp\n");
     fprintf(stderr, "# ts\t\tsuccess\terrors\ttimeout\tcloses\tsuccess\terror\t");

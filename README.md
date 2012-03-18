@@ -34,7 +34,7 @@ The default host is `127.0.0.1`, and the default port is `80`.
 
 * `-l` limits the request rate on each concurrent thread on each process (in hertz; defaults to no limit)
 
-* `-w` specifies a warmup for each thread (the number of ignored successful requests)
+* `-w` specifies a warmup for each thread (the number of ignored requests)
 
 * `-u` allows specifying a path other than `/`.
 
