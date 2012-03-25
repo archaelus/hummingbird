@@ -31,7 +31,7 @@
 #define USEC_FUDGE -300
 
 #define debug(s) ;
-//#define debug(s) fprintf(stderr, s);
+//#define debug(s) fprintf(stderr, "runner %d -> ", runner->id); fprintf(stderr, s);
 
 char *http_hostname;
 uint16_t http_port;
@@ -82,8 +82,11 @@ struct Runner{
     struct evhttp_connection *evcon;
     struct request            *req;
     int                       reqno;
+    int                       id;
 };
 typedef struct Runner Runner;
+
+int runnerid = 0;
 
 enum{
     Success,
@@ -103,7 +106,7 @@ int             nreport = 0;
 int             nreportbuf[NBUFFER];
 int             *reportbuf[NBUFFER];
 
-struct evhttp_connection *mkhttp();
+void mkhttp(Runner *runner);
 
 void recvcb(struct evhttp_request *req, void *arg);
 void timeoutcb(int fd, short what, void *arg);
@@ -186,7 +189,6 @@ reportcb(int fd, short what, void *arg)
 
     if(params.count<0 || conn_total<params.count){
         evtimer_add(&reportev, &reporttv);
-        debug("reportcb(): evtimer_add(&reportev, &reporttv);\n");
     }
 }
 
@@ -194,8 +196,8 @@ reportcb(int fd, short what, void *arg)
     HTTP, via libevent's HTTP support.
 */
 
-struct evhttp_connection *
-mkhttp()
+void
+mkhttp(Runner *runner)
 {
     struct evhttp_connection *evcon;
 
@@ -203,16 +205,12 @@ mkhttp()
     if(evcon == nil)
         panic("evhttp_connection_new");
 
-    evhttp_connection_set_closecb(evcon, &closecb, nil);
+    evhttp_connection_set_closecb(evcon, &closecb, runner);
     /*
         note: we manage our own per-request timeouts, since the underlying
         library does not give us enough error reporting fidelity
     */
-
-    /* also set some socket options manually. */
-
-
-    return(evcon);
+    runner->evcon = evcon;
 }
 
 void
@@ -309,16 +307,16 @@ complete(int how, Runner *runner)
             }else{
                 // re-establish the connection
                 evhttp_connection_free(runner->evcon);
-                runner->evcon = mkhttp();
+                mkhttp(runner);
                 dispatch(runner, 1);
             }
-        } else {
         }
     }else{
         /* We'll count this as a close. I guess that's ok. */
         evhttp_connection_free(req->evcon);
         if(--params.concurrency == 0){
             evtimer_del(&reportev);
+            debug("last call to reportcb\n");
             reportcb(0, 0, nil);  /* issue a last report */
         }
     }
@@ -331,8 +329,8 @@ complete(int how, Runner *runner)
 void
 runnerEventCallback(int fd, short what, void *arg)
 {
-    debug("runnerEventCallback()\n");
     Runner *runner = (Runner *)arg;
+    debug("runnerEventCallback()\n");
     if(rateLimitingEnabled()) {
         event_add(&runner->ev, &runner->tv);
     }
@@ -347,10 +345,12 @@ void
 startNewRunner()
 {
     Runner *runner = calloc(1, sizeof(Runner));
+    runner->id = runnerid++;
+
     if(runner == nil)
         panic("calloc");
 
-    runner->evcon = mkhttp();
+    mkhttp(runner);
 
     if(rateLimitingEnabled()) {
         runner->tv.tv_sec = 0;
@@ -390,13 +390,12 @@ recvcb(struct evhttp_request *evreq, void *arg)
 void
 timeoutcb(int fd, short what, void *arg)
 {
-    debug("timeoutcb()\n");
     Runner *runner = (Runner *)arg;
-    struct request *req = runner->req;
+    debug("timeoutcb()\n");
 
     /* re-establish the connection */
-    evhttp_connection_free(req->evcon);
-    req->evcon = mkhttp();
+    evhttp_connection_free(runner->evcon);
+    mkhttp(runner);
 
     complete(Timeout, runner);
 }
@@ -404,7 +403,13 @@ timeoutcb(int fd, short what, void *arg)
 void
 closecb(struct evhttp_connection *evcon, void *arg)
 {
+    Runner *runner = (Runner *)arg;
     debug("closecb()\n");
+
+    /* re-establish the connection */
+//    evhttp_connection_free(runner->evcon);
+//    mkhttp(runner);
+
     counts.conn_closes++;
 }
 
@@ -470,9 +475,6 @@ chlderrcb(struct bufferevent *b, short what, void *arg)
     bufferevent_setcb(b, nil, nil, nil, nil);
     bufferevent_disable(b, EV_READ | EV_WRITE);
     bufferevent_free(b);
-
-    /*if(--(*nprocs) == 0)
-        event_loopbreak();*/
 }
 
 void
@@ -503,8 +505,10 @@ parentd(int nprocs, int *sockets)
 
     event_dispatch();
 
-    for(i=0; i<nprocs; i++)
+    for(i=0; i<nprocs; i++){
+        fprintf(stderr, "Waiting for %d\n", i);
         pid = waitpid(0, &status, 0);
+    }
 
     report();
 }
@@ -587,6 +591,8 @@ main(int argc, char **argv)
     params.path = "/";
 
     memset(&counts, 0, sizeof(counts));
+
+    signal(SIGPIPE, SIG_IGN);
 
     while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:h")) != -1){
         switch(ch){
@@ -741,7 +747,6 @@ main(int argc, char **argv)
         /* event handler for reports */
         evtimer_set(&reportev, reportcb, nil);
         evtimer_add(&reportev, &reporttv);
-        debug("main(): evtimer_add(&reportev, &reporttv);\n");
         event_dispatch();
 
         break;
