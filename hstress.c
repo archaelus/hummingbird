@@ -30,6 +30,9 @@
 // cheap hack to get closer to our Hz target
 #define USEC_FUDGE -300
 
+#define debug(s) ;
+//#define debug(s) fprintf(stderr, s);
+
 char *http_hostname;
 uint16_t http_port;
 char http_hosthdr[2048];
@@ -66,6 +69,7 @@ int num_cols = 6;
 struct request{
     struct timeval           starttv;
     struct event             timeoutev;
+    struct event             dispatchev;
     int                      sock;
     struct evhttp_connection *evcon;
     struct evhttp_request    *evreq;
@@ -92,6 +96,7 @@ struct event    reportev;
 struct timeval  reporttv ={ 1, 0 };
 struct timeval  timeouttv ={ 1, 0 };
 struct timeval  lastreporttv;
+struct timeval  zerotv = { 0, 0 };
 int             request_timeout;
 struct timeval  ratetv;
 int             ratecount = 0;
@@ -99,13 +104,15 @@ int             nreport = 0;
 int             nreportbuf[NBUFFER];
 int             *reportbuf[NBUFFER];
 
+struct evhttp_connection *mkhttp();
+
 void recvcb(struct evhttp_request *req, void *arg);
 void timeoutcb(int fd, short what, void *arg);
-struct evhttp_connection *mkhttp();
+void dispatchcb(int fd, short what, void *arg);
 void closecb(struct evhttp_connection *evcon, void *arg);
+
 void report();
 void sigint(int which);
-
 
 unsigned char
 rateLimitingEnabled()
@@ -173,8 +180,10 @@ reportcb(int fd, short what, void *arg)
 
     memset(counts.counters, 0, sizeof(counts.counters));
 
-    if(params.count<0 || conn_total<params.count)
+    if(params.count<0 || conn_total<params.count){
         evtimer_add(&reportev, &reporttv);
+        debug("reportcb(): evtimer_add(&reportev, &reporttv);\n");
+    }
 }
 
 /*
@@ -226,8 +235,9 @@ dispatch(Runner *runner, int reqno)
     evhttp_add_header(evreq->output_headers, "Host", http_hosthdr);
 
     gettimeofday(&req->starttv, nil);
-    evtimer_set(&req->timeoutev, timeoutcb,(void *)runner);
+    evtimer_set(&req->timeoutev, timeoutcb, runner);
     evtimer_add(&req->timeoutev, &timeouttv);
+    debug("dispatch(): evtimer_add(&req->timeoutev, &timeouttv);\n");
 
     evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, params.path);
 }
@@ -284,18 +294,23 @@ complete(int how, Runner *runner)
     saveRequest(how, runner);
 
     evtimer_del(&req->timeoutev);
+    debug("complete(): evtimer_del(&req->timeoutev);\n");
 
     /* enqueue the next one */
     if(params.count<0 || conn_total<params.count){
         // re-scheduling is handled by the callback
-        if(!rateLimitingEnabled()) {
+        if(!rateLimitingEnabled()){
             if(params.rpc<0 || params.rpc>req->evcon_reqno){
                 dispatch(runner, req->evcon_reqno + 1);
             }else{
-                evhttp_connection_free(req->evcon);
-                runner->evcon = mkhttp();
-                dispatch(runner, 1);
+                /* There seems to be a bug in libevent where the connection isn't really
+                 * freed until the event loop is unwound. We'll add ourselves back with a
+                 * 0-second timeout. */
+                evtimer_set(&req->dispatchev, dispatchcb, runner);
+                evtimer_add(&req->dispatchev, &zerotv);
+                debug("complete(): evtimer_add(dispatchev, &zerotv);\n");
             }
+        } else {
         }
     }else{
         /* We'll count this as a close. I guess that's ok. */
@@ -306,20 +321,21 @@ complete(int how, Runner *runner)
         }
     }
 
-    if (!rateLimitingEnabled())
-      // FIXME Memory leak?
+    if(!rateLimitingEnabled())
+      // FIXME possible memory leak
       free(req);
 }
 
 void
 runnerEventCallback(int fd, short what, void *arg)
 {
+    debug("runnerEventCallback()\n");
     Runner *runner = (Runner *)arg;
     if(rateLimitingEnabled()) {
         event_add(&runner->ev, &runner->tv);
     }
 
-    dispatch(runner, ++ runner->reqno);
+    dispatch(runner, runner->reqno + 1);
 }
 
 /**
@@ -343,6 +359,7 @@ startNewRunner()
 
         evtimer_set(&runner->ev, runnerEventCallback, runner);
         evtimer_add(&runner->ev, &runner->tv);
+        debug("startNewRunner(): evtimer_add(&runner->ev, &runner->tv);\n");
     } else {
         // skip the timers and just loop as fast as possible
         runnerEventCallback(0, 0, runner);
@@ -371,6 +388,7 @@ recvcb(struct evhttp_request *evreq, void *arg)
 void
 timeoutcb(int fd, short what, void *arg)
 {
+    debug("timeoutcb()\n");
     Runner *runner = (Runner *)arg;
     struct request *req = runner->req;
 
@@ -382,8 +400,22 @@ timeoutcb(int fd, short what, void *arg)
 }
 
 void
+dispatchcb(int fd, short what, void *arg)
+{
+    debug("dispatchcb()\n");
+    Runner *runner = (Runner *)arg;
+
+    /* re-establish the connection */
+    evhttp_connection_free(runner->evcon);
+    runner->evcon = mkhttp();
+
+    dispatch(runner, 1);
+}
+
+void
 closecb(struct evhttp_connection *evcon, void *arg)
 {
+    debug("closecb()\n");
     counts.conn_closes++;
 }
 
@@ -643,8 +675,11 @@ main(int argc, char **argv)
     case 0:
         break;
     default:
-        panic("only 0 or 1(host port) pair are allowed\n");
+        panic("Invalid arguments: couldn't understand host and port.");
     }
+
+    if(rateLimitingEnabled() && params.rpc > -1)
+      panic("Invalid arguments: -l (MAX_QPS) does not support -r (RPC).");
 
     http_hostname = host;
     http_port = port;
@@ -717,7 +752,7 @@ main(int argc, char **argv)
         /* event handler for reports */
         evtimer_set(&reportev, reportcb, nil);
         evtimer_add(&reportev, &reporttv);
-
+        debug("main(): evtimer_add(&reportev, &reporttv);\n");
         event_dispatch();
 
         break;
