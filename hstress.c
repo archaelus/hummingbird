@@ -31,7 +31,7 @@
 #define USEC_FUDGE -300
 
 #define debug(s) ;
-//#define debug(s) fprintf(stderr, "runner %d -> ", runner->id); fprintf(stderr, s);
+//#define debug(s) fprintf(stderr, "run %d -> ", run->id); fprintf(stderr, s);
 
 char *http_hostname;
 uint16_t http_port;
@@ -54,6 +54,7 @@ struct{
 }params;
 
 struct{
+    int conns;
     int conn_successes;
     int counters[MAX_BUCKETS + 1];
     int conn_errors;
@@ -63,7 +64,6 @@ struct{
     int http_errors;
 }counts;
 
-int conn_total = 0;
 int num_cols = 6;
 
 struct request{
@@ -76,7 +76,7 @@ struct request{
     int                      evcon_reqno;
 };
 
-struct Runner{
+struct runner{
     struct timeval            tv;
     struct event              ev;
     struct evhttp_connection *evcon;
@@ -84,9 +84,9 @@ struct Runner{
     int                       reqno;
     int                       id;
 };
-typedef struct Runner Runner;
+typedef struct runner runner;
 
-int runnerid = 0;
+int runid = 0;
 
 enum{
     Success,
@@ -106,7 +106,7 @@ int             nreport = 0;
 int             nreportbuf[NBUFFER];
 int             *reportbuf[NBUFFER];
 
-void mkhttp(Runner *runner);
+void mkhttp(runner *run);
 
 void recvcb(struct evhttp_request *req, void *arg);
 void timeoutcb(int fd, short what, void *arg);
@@ -116,19 +116,19 @@ void report();
 void sigint(int which);
 
 unsigned char
-rateLimitingEnabled()
+qps_enabled()
 {
     return params.qps > 0;
 }
 
 unsigned char
-requestsPerConnectionEnabled()
+rpc_enabled()
 {
     return params.rpc > 0;
 }
 
 unsigned char
-tsvOutputEnabled()
+tsv_enabled()
 {
     return params.tsvout != nil;
 }
@@ -138,7 +138,7 @@ tsvOutputEnabled()
 */
 
 long
-millisecondsSinceStart(struct timeval *tv)
+milliseconds_since_start(struct timeval *tv)
 {
     long milliseconds;
     struct timeval now, diff;
@@ -154,12 +154,12 @@ long
 mkrate(struct timeval *tv, int count)
 {
     long milliseconds;
-    milliseconds = millisecondsSinceStart(tv);
+    milliseconds = milliseconds_since_start(tv);
     return(1000L * count / milliseconds);
 }
 
 void
-resetTime(struct timeval *tv)
+reset_time(struct timeval *tv)
 {
     gettimeofday(tv, nil);
 }
@@ -187,7 +187,7 @@ reportcb(int fd, short what, void *arg)
 
     memset(counts.counters, 0, sizeof(counts.counters));
 
-    if(params.count<0 || conn_total<params.count){
+    if(params.count<0 || counts.conns<params.count){
         evtimer_add(&reportev, &reporttv);
     }
 }
@@ -197,7 +197,7 @@ reportcb(int fd, short what, void *arg)
 */
 
 void
-mkhttp(Runner *runner)
+mkhttp(runner *run)
 {
     struct evhttp_connection *evcon;
 
@@ -205,29 +205,29 @@ mkhttp(Runner *runner)
     if(evcon == nil)
         panic("evhttp_connection_new");
 
-    evhttp_connection_set_closecb(evcon, &closecb, runner);
+    evhttp_connection_set_closecb(evcon, &closecb, run);
     /*
         note: we manage our own per-request timeouts, since the underlying
         library does not give us enough error reporting fidelity
     */
-    runner->evcon = evcon;
+    run->evcon = evcon;
 }
 
 void
-dispatch(Runner *runner, int reqno)
+dispatch(runner *run, int reqno)
 {
-    struct evhttp_connection *evcon = runner->evcon;
+    struct evhttp_connection *evcon = run->evcon;
     struct evhttp_request *evreq;
     struct request *req;
 
     if((req = calloc(1, sizeof(*req))) == nil)
         panic("calloc");
 
-    runner->req = req;
+    run->req = req;
     req->evcon = evcon;
     req->evcon_reqno = reqno;
 
-    evreq = evhttp_request_new(&recvcb, runner);
+    evreq = evhttp_request_new(&recvcb, run);
     if(evreq == nil)
         panic("evhttp_request_new");
 
@@ -237,37 +237,36 @@ dispatch(Runner *runner, int reqno)
     evhttp_add_header(evreq->output_headers, "Host", http_hosthdr);
 
     gettimeofday(&req->starttv, nil);
-    evtimer_set(&req->timeoutev, timeoutcb, runner);
+    evtimer_set(&req->timeoutev, timeoutcb, run);
     evtimer_add(&req->timeoutev, &timeouttv);
     debug("dispatch(): evtimer_add(&req->timeoutev, &timeouttv);\n");
 
+    counts.conns++;
     evhttp_make_request(evcon, evreq, EVHTTP_REQ_GET, params.path);
 }
 
 void
-saveRequest(int how, Runner *runner)
+save_request(int how, runner *run)
 {
-    struct request *req = runner->req;
+    struct request *req = run->req;
     int i;
-    long startMicros, nowMicros;
-    long milliseconds;
+    long start_microseconds, now_microseconds, milliseconds;
     struct timeval now, diff;
 
     gettimeofday(&now, nil);
 
-    startMicros = req->starttv.tv_sec * 1000000 + req->starttv.tv_usec;
-    nowMicros   = now.tv_sec * 1000000 + now.tv_usec;
+    start_microseconds = req->starttv.tv_sec * 1000000 + req->starttv.tv_usec;
+    now_microseconds   = now.tv_sec * 1000000 + now.tv_usec;
 
     timersub(&now, &req->starttv, &diff);
-    milliseconds = (nowMicros - startMicros)/1000;
+    milliseconds = (now_microseconds - start_microseconds)/1000;
 
-    if(tsvOutputEnabled()) {
-        fprintf(params.tsvoutfile, "%ld\t%ld\t%d\n", startMicros, nowMicros, how);
+    if(tsv_enabled()) {
+        fprintf(params.tsvoutfile, "%ld\t%ld\t%d\n", start_microseconds, now_microseconds, how);
     }
 
     switch(how){
     case Success:
-        conn_total++;
         counts.conn_successes++;
     switch(req->evreq->response_code){
         case 200:
@@ -290,25 +289,25 @@ saveRequest(int how, Runner *runner)
 }
 
 void
-complete(int how, Runner *runner)
+complete(int how, runner *run)
 {
-    struct request *req = runner -> req;
-    saveRequest(how, runner);
+    struct request *req = run->req;
+    save_request(how, run);
 
     evtimer_del(&req->timeoutev);
     debug("complete(): evtimer_del(&req->timeoutev);\n");
 
     /* enqueue the next one */
-    if(params.count<0 || conn_total<params.count){
+    if(params.count<0 || counts.conns<params.count){
         // re-scheduling is handled by the callback
-        if(!rateLimitingEnabled()){
-            if(!requestsPerConnectionEnabled() || req->evcon_reqno<params.rpc){
-                dispatch(runner, req->evcon_reqno + 1);
+        if(!qps_enabled()){
+            if(!rpc_enabled() || req->evcon_reqno<params.rpc){
+                dispatch(run, req->evcon_reqno + 1);
             }else{
                 // re-establish the connection
-                evhttp_connection_free(runner->evcon);
-                mkhttp(runner);
-                dispatch(runner, 1);
+                evhttp_connection_free(run->evcon);
+                mkhttp(run);
+                dispatch(run, 1);
             }
         }
     }else{
@@ -321,50 +320,50 @@ complete(int how, Runner *runner)
         }
     }
 
-    if(!rateLimitingEnabled())
+    if(!qps_enabled())
       // FIXME possible memory leak
       free(req);
 }
 
 void
-runnerEventCallback(int fd, short what, void *arg)
+runnercb(int fd, short what, void *arg)
 {
-    Runner *runner = (Runner *)arg;
-    debug("runnerEventCallback()\n");
-    if(rateLimitingEnabled()) {
-        event_add(&runner->ev, &runner->tv);
+    runner *run = (runner *)arg;
+    debug("runnercb()\n");
+    if(qps_enabled()) {
+        event_add(&run->ev, &run->tv);
     }
 
-    dispatch(runner, runner->reqno + 1);
+    dispatch(run, run->reqno + 1);
 }
 
 /**
- start a new, potentially, rate-limited runner
+ start a new, potentially, rate-limited run
  */
 void
-startNewRunner()
+mkrunner()
 {
-    Runner *runner = calloc(1, sizeof(Runner));
-    runner->id = runnerid++;
+    runner *run = calloc(1, sizeof(runner));
+    run->id = runid++;
 
-    if(runner == nil)
+    if(run == nil)
         panic("calloc");
 
-    mkhttp(runner);
+    mkhttp(run);
 
-    if(rateLimitingEnabled()) {
-        runner->tv.tv_sec = 0;
-        runner->tv.tv_usec = 1000000/params.qps + USEC_FUDGE;
+    if(qps_enabled()) {
+        run->tv.tv_sec = 0;
+        run->tv.tv_usec = 1000000/params.qps + USEC_FUDGE;
 
-        if(runner->tv.tv_usec < 1)
-            runner->tv.tv_usec = 1;
+        if(run->tv.tv_usec < 1)
+            run->tv.tv_usec = 1;
 
-        evtimer_set(&runner->ev, runnerEventCallback, runner);
-        evtimer_add(&runner->ev, &runner->tv);
-        debug("startNewRunner(): evtimer_add(&runner->ev, &runner->tv);\n");
+        evtimer_set(&run->ev, runnercb, run);
+        evtimer_add(&run->ev, &run->tv);
+        debug("mkrunner(): evtimer_add(&run->ev, &run->tv);\n");
     } else {
         // skip the timers and just loop as fast as possible
-        runnerEventCallback(0, 0, runner);
+        runnercb(0, 0, run);
     }
 }
 
@@ -384,32 +383,27 @@ recvcb(struct evhttp_request *evreq, void *arg)
     if(evreq == nil || evreq->response_code < 0)
         status = Error;
 
-    complete(status, (Runner *)arg);
+    complete(status, (runner *)arg);
 }
 
 void
 timeoutcb(int fd, short what, void *arg)
 {
-    Runner *runner = (Runner *)arg;
+    runner *run = (runner *)arg;
     debug("timeoutcb()\n");
 
     /* re-establish the connection */
-    evhttp_connection_free(runner->evcon);
-    mkhttp(runner);
+    evhttp_connection_free(run->evcon);
+    mkhttp(run);
 
-    complete(Timeout, runner);
+    complete(Timeout, run);
 }
 
 void
 closecb(struct evhttp_connection *evcon, void *arg)
 {
-    Runner *runner = (Runner *)arg;
+    runner *run = (runner *)arg;
     debug("closecb()\n");
-
-    /* re-establish the connection */
-//    evhttp_connection_free(runner->evcon);
-//    mkhttp(runner);
-
     counts.conn_closes++;
 }
 
@@ -444,7 +438,7 @@ chldreadcb(struct bufferevent *b, void *arg)
             for(i = 0; i < params.nbuckets + num_cols; i++)
                 printf("%d\t", reportbuf[n][i]);
             printf("%ld\n", mkrate(&lastreporttv, reportbuf[n][0]));
-            resetTime(&lastreporttv);
+            reset_time(&lastreporttv);
 
             /* Aggregate. */
             counts.conn_successes += reportbuf[n][0];
@@ -481,7 +475,6 @@ void
 parentd(int nprocs, int *sockets)
 {
     int *fdp, i, status;
-    pid_t pid;
     struct bufferevent *b;
 
     signal(SIGINT, sigint);
@@ -505,10 +498,8 @@ parentd(int nprocs, int *sockets)
 
     event_dispatch();
 
-    for(i=0; i<nprocs; i++){
-        fprintf(stderr, "Waiting for %d\n", i);
-        pid = waitpid(0, &status, 0);
-    }
+    for(i=0; i<nprocs; i++)
+        waitpid(0, &status, 0);
 
     report();
 }
@@ -536,6 +527,10 @@ report()
     char buf[128];
     int i, total = counts.conn_successes + counts.conn_errors + counts.conn_timeouts;
 
+    fprintf(stderr, "# hz\t\t\t%ld\n", mkrate(&ratetv, total));
+    fprintf(stderr, "# time\t\t\t%.3f\n", milliseconds_since_start(&ratetv)/1000.0);
+
+    printcount("conn_total    ", total, total);
     printcount("conn_successes", total, counts.conn_successes);
     printcount("conn_errors   ", total, counts.conn_errors);
     printcount("conn_timeouts ", total, counts.conn_timeouts);
@@ -549,10 +544,6 @@ report()
 
     snprintf(buf, sizeof(buf), ">=%d\t\t", params.buckets[i - 1]);
     printcount(buf, total, counts.counters[i]);
-
-    /* no total */
-    fprintf(stderr, "# time\t\t\t%.3f\n", millisecondsSinceStart(&ratetv)/1000.0);
-    fprintf(stderr, "# hz\t\t\t%ld\n", mkrate(&ratetv, total));
 }
 
 /*
@@ -673,7 +664,7 @@ main(int argc, char **argv)
         panic("Invalid arguments: couldn't understand host and port.");
     }
 
-    if(rateLimitingEnabled() && requestsPerConnectionEnabled())
+    if(qps_enabled() && rpc_enabled())
       panic("Invalid arguments: -l (MAX_QPS) does not support -r (RPC).");
 
     http_hostname = host;
@@ -736,13 +727,13 @@ main(int argc, char **argv)
         close(fds[1]);
 
         // create a buffer for this process
-        if(tsvOutputEnabled()) {
-            char *outBuffer = mal(sizeof(char) * OUTFILE_BUFFER_SIZE);
-            setvbuf(params.tsvoutfile, outBuffer, _IOLBF, OUTFILE_BUFFER_SIZE);
+        if(tsv_enabled()) {
+            char *out = mal(sizeof(char) * OUTFILE_BUFFER_SIZE);
+            setvbuf(params.tsvoutfile, out, _IOLBF, OUTFILE_BUFFER_SIZE);
         }
 
         for(i=0; i<params.concurrency; i++)
-            startNewRunner();
+            mkrunner();
 
         /* event handler for reports */
         evtimer_set(&reportev, reportcb, nil);
