@@ -96,7 +96,6 @@ struct event    reportev;
 struct timeval  reporttv ={ 1, 0 };
 struct timeval  timeouttv ={ 1, 0 };
 struct timeval  lastreporttv;
-struct timeval  zerotv = { 0, 0 };
 int             request_timeout;
 struct timeval  ratetv;
 int             ratecount = 0;
@@ -108,7 +107,6 @@ struct evhttp_connection *mkhttp();
 
 void recvcb(struct evhttp_request *req, void *arg);
 void timeoutcb(int fd, short what, void *arg);
-void dispatchcb(int fd, short what, void *arg);
 void closecb(struct evhttp_connection *evcon, void *arg);
 
 void report();
@@ -118,6 +116,12 @@ unsigned char
 rateLimitingEnabled()
 {
     return params.qps > 0;
+}
+
+unsigned char
+requestsPerConnectionEnabled()
+{
+    return params.rpc > 0;
 }
 
 unsigned char
@@ -300,15 +304,13 @@ complete(int how, Runner *runner)
     if(params.count<0 || conn_total<params.count){
         // re-scheduling is handled by the callback
         if(!rateLimitingEnabled()){
-            if(params.rpc<0 || params.rpc>req->evcon_reqno){
+            if(!requestsPerConnectionEnabled() || req->evcon_reqno<params.rpc){
                 dispatch(runner, req->evcon_reqno + 1);
             }else{
-                /* There seems to be a bug in libevent where the connection isn't really
-                 * freed until the event loop is unwound. We'll add ourselves back with a
-                 * 0-second timeout. */
-                evtimer_set(&req->dispatchev, dispatchcb, runner);
-                evtimer_add(&req->dispatchev, &zerotv);
-                debug("complete(): evtimer_add(dispatchev, &zerotv);\n");
+                // re-establish the connection
+                evhttp_connection_free(runner->evcon);
+                runner->evcon = mkhttp();
+                dispatch(runner, 1);
             }
         } else {
         }
@@ -397,19 +399,6 @@ timeoutcb(int fd, short what, void *arg)
     req->evcon = mkhttp();
 
     complete(Timeout, runner);
-}
-
-void
-dispatchcb(int fd, short what, void *arg)
-{
-    debug("dispatchcb()\n");
-    Runner *runner = (Runner *)arg;
-
-    /* re-establish the connection */
-    evhttp_connection_free(runner->evcon);
-    runner->evcon = mkhttp();
-
-    dispatch(runner, 1);
 }
 
 void
@@ -678,7 +667,7 @@ main(int argc, char **argv)
         panic("Invalid arguments: couldn't understand host and port.");
     }
 
-    if(rateLimitingEnabled() && params.rpc > -1)
+    if(rateLimitingEnabled() && requestsPerConnectionEnabled())
       panic("Invalid arguments: -l (MAX_QPS) does not support -r (RPC).");
 
     http_hostname = host;
