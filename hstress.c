@@ -51,7 +51,7 @@ struct{
 
     // request path
     char *path;
-    int host_hdr_set;
+    char *host_hdr;
 }params;
 
 struct{
@@ -581,13 +581,13 @@ main(int argc, char **argv)
     params.buckets[2] = 100;
     params.nbuckets = 4;
     params.path = "/";
-    params.host_hdr_set = 0;
+    params.host_hdr = 0;
 
     memset(&counts, 0, sizeof(counts));
 
     signal(SIGPIPE, SIG_IGN);
 
-    while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:h:H")) != -1){
+    while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:H:h")) != -1){
         switch(ch){
         case 'b':
             sp = optarg;
@@ -645,9 +645,7 @@ main(int argc, char **argv)
             break;
 
         case 'H':
-            if(snprintf(http_hosthdr, sizeof(http_hosthdr), "%s", optarg) > sizeof(http_hosthdr))
-                panic("snprintf");
-            params.host_hdr_set = 1;
+            params.host_hdr = optarg;
             break;
 
         case 'h':
@@ -669,6 +667,7 @@ main(int argc, char **argv)
     case 0:
         break;
     default:
+        fprintf(stderr, "# Optind: %d, argc %d\n", optind, argc);
         panic("Invalid arguments: couldn't understand host and port.");
     }
 
@@ -678,8 +677,13 @@ main(int argc, char **argv)
     http_hostname = host;
     http_port = port;
 
-    if(params.host_hdr_set == 0 || snprintf(http_hosthdr, sizeof(http_hosthdr), "%s:%d", host, port) > sizeof(http_hosthdr))
-        panic("snprintf");
+    if (params.host_hdr != 0) {
+        if(snprintf(http_hosthdr, sizeof(http_hosthdr), "%s", params.host_hdr) > sizeof(http_hosthdr))
+            panic("snprintf");
+    } else {
+        if(snprintf(http_hosthdr, sizeof(http_hosthdr), "%s:%d", host, port) > sizeof(http_hosthdr))
+            panic("snprintf");
+    }
 
     fprintf(stderr, "# Host: %s\n", http_hosthdr);
 
