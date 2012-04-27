@@ -51,6 +51,7 @@ struct{
 
     // request path
     char *path;
+    int host_hdr_set;
 }params;
 
 struct{
@@ -557,7 +558,7 @@ usage(char *cmd)
         stderr,
         "%s: [-c CONCURRENCY] [-b BUCKETS] [-n COUNT] [-p NUMPROCS]\n"
         "[-r RPC] [-i INTERVAL] [-o TSV RECORD] [-l MAX_QPS]\n"
-        "[-u PATH] [HOST] [PORT]\n",
+        "[-u PATH] [-H HOST_HDR] [HOST] [PORT]\n",
         cmd);
 
     exit(0);
@@ -580,12 +581,13 @@ main(int argc, char **argv)
     params.buckets[2] = 100;
     params.nbuckets = 4;
     params.path = "/";
+    params.host_hdr_set = 0;
 
     memset(&counts, 0, sizeof(counts));
 
     signal(SIGPIPE, SIG_IGN);
 
-    while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:h")) != -1){
+    while((ch = getopt(argc, argv, "c:l:b:n:p:r:i:u:o:h:H")) != -1){
         switch(ch){
         case 'b':
             sp = optarg;
@@ -642,6 +644,12 @@ main(int argc, char **argv)
             params.path = optarg;
             break;
 
+        case 'H':
+            if(snprintf(http_hosthdr, sizeof(http_hosthdr), "%s", optarg) > sizeof(http_hosthdr))
+                panic("snprintf");
+            params.host_hdr_set = 1;
+            break;
+
         case 'h':
             usage(cmd);
             break;
@@ -669,8 +677,11 @@ main(int argc, char **argv)
 
     http_hostname = host;
     http_port = port;
-    if(snprintf(http_hosthdr, sizeof(http_hosthdr), "%s:%d", host, port) > sizeof(http_hosthdr))
+
+    if(params.host_hdr_set == 0 || snprintf(http_hosthdr, sizeof(http_hosthdr), "%s:%d", host, port) > sizeof(http_hosthdr))
         panic("snprintf");
+
+    fprintf(stderr, "# Host: %s\n", http_hosthdr);
 
     for(i = 0; params.buckets[i] != 0; i++)
         request_timeout = params.buckets[i];
