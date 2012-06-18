@@ -42,15 +42,12 @@ class Plotter
         @buckets = [1,10,100]
         @bucket_symbols = @buckets.sort.map{|bucket| ("under_" + bucket.to_s).to_sym}
         @bucket_symbols << ("over_" + @buckets.sort.last.to_s).to_sym
-        @font_file = ""
         @font_file = "#{File.dirname(__FILE__)}/../fonts/Ropa_Sans/RopaSans-Regular.ttf"
         @font_size_thumb = "8"
         @font_size_standard = "13"
         @graph_size_thumb = "600,200"
         @graph_size_standard = "1200,300"
-        @data_file = ""
         @images_dir_name = "test_images"
-        @images_dir = ""
         @thumbnails = false
         @verbose = false
     end
@@ -66,7 +63,7 @@ class Plotter
 
         # Now that we know where the data file is, we can make the images directory relative to it
         @images_dir = File.dirname(data_file) + "/#{@images_dir_name}"
-        puts "Images dir: #{@images_dir}" if @verbose
+        puts "Images dir: #{@images_dir}"
         Dir.mkdir(@images_dir) unless File.exists?(@images_dir)
 
         f = File.new(data_file)
@@ -149,7 +146,7 @@ class Plotter
                     plot.format 'x "%H:%M:%S"'
 
                     # Write out the name of the file being created
-                    puts "FILE: #{png_file}"
+                    puts "  Generating Image: #{png_file}"
 
                     # Make a data set for each of the resources
                     graph_keys.each do |key|
@@ -187,7 +184,7 @@ class OptParse
         default_plotter_options = Plotter.new
 
         opts = OptionParser.new do |opts|
-            opts.banner = "Usage: #{__FILE__} [options] -d DATA_FILE"
+            opts.banner = "Graph output from hstress\n\nUsage: #{__FILE__} [options] -d DATA_FILE"
 
             opts.separator ""
             opts.separator "Required:"
