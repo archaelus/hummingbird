@@ -15,7 +15,7 @@ static void respond(struct evhttp_request *req, void *arg);
 char content[6*1024];
 
 void
-serve(char *host, short port)
+serve(char *host, uint16_t port)
 {
 	struct event_base *base;
 	struct evhttp *http;
