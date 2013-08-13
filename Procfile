@@ -1,1 +1,1 @@
-web: hserve $PORT
+web: ./hserve $PORT
