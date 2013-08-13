@@ -42,7 +42,7 @@ respond(struct evhttp_request *req, void *arg)
 {
 	struct evbuffer *buf;
 	buf = evbuffer_new();
-	evbuffer_add_reference(buf, content, sizeof(content), nil, nil);
+	evbuffer_add(buf, content, sizeof(content));
 	evhttp_send_reply(req, HTTP_OK, "nectar", buf);
 	evbuffer_free(buf);
 }
