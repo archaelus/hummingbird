@@ -1,6 +1,6 @@
 CFLAGS=-Wall -g
 
-all: hstress hserve hplay
+all: hstress hserve
 
 hstress: u.o hstress.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -levent -o $@ $^
