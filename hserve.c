@@ -66,6 +66,6 @@ main(int argc, char **argv)
 
 	memset(content, 'Z', sizeof(content));
 
-	serve("127.0.0.1", port);
+	serve("0.0.0.0", port);
 	return 0;
 }
